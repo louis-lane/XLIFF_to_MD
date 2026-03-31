@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 import sys
 import time
+import csv
 
 # --- CONFIGURATION ---
 FILENAME_PATTERN = re.compile(r"p\d+i(\d+)", re.IGNORECASE)
@@ -27,7 +28,7 @@ def get_sort_key(filename):
     return 9999
 
 def parse_xliff_content(xml_content):
-    extracted_lines = []
+    extracted_data = []
     try:
         root = ET.fromstring(xml_content)
         namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
@@ -36,16 +37,27 @@ def parse_xliff_content(xml_content):
             trans_units = root.findall('.//trans-unit') + root.findall('.//unit')
 
         for unit in trans_units:
+            unit_id = unit.get('id', 'N/A')
+            
+            # Find Source
             source = unit.find('xliff:source', namespaces)
             if source is None:
                 source = unit.find('source')
-            if source is not None and source.text:
-                text = " ".join(source.text.split())
-                if text:
-                    extracted_lines.append(text)
+                
+            # Find Target
+            target = unit.find('xliff:target', namespaces)
+            if target is None:
+                target = unit.find('target')
+
+            source_text = " ".join(source.text.split()) if source is not None and source.text else ""
+            target_text = " ".join(target.text.split()) if target is not None and target.text else ""
+            
+            # Only append if there is actual source or target text
+            if source_text or target_text:
+                extracted_data.append((unit_id, source_text, target_text))
     except Exception:
         pass 
-    return extracted_lines
+    return extracted_data
 
 def process_course_folder(course_path):
     course_name = course_path.name
@@ -61,9 +73,9 @@ def process_course_folder(course_path):
                 sort_num = get_sort_key(file)
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
-                        text_lines = parse_xliff_content(f.read())
-                        if text_lines:
-                            all_course_data.append((sort_num, file, text_lines))
+                        extracted_data = parse_xliff_content(f.read())
+                        if extracted_data:
+                            all_course_data.append((sort_num, file, extracted_data))
                 except Exception as e:
                     print(f"  Error reading {file}: {e}")
 
@@ -74,23 +86,28 @@ def process_course_folder(course_path):
                             if internal_filename.lower().endswith(('.xlf', '.xliff')):
                                 sort_num = get_sort_key(internal_filename)
                                 with z.open(internal_filename) as zf:
-                                    text_lines = parse_xliff_content(zf.read())
-                                    if text_lines:
-                                        all_course_data.append((sort_num, internal_filename, text_lines))
+                                    extracted_data = parse_xliff_content(zf.read())
+                                    if extracted_data:
+                                        all_course_data.append((sort_num, internal_filename, extracted_data))
                 except Exception as e:
                     print(f"  Error reading zip {file}: {e}")
 
     all_course_data.sort(key=lambda x: (x[0], x[1]))
 
     if all_course_data:
-        output_filename = get_base_path() / f"{course_name}_Summary.md"
-        with open(output_filename, 'w', encoding='utf-8') as md:
-            md.write(f"# Course Summary: {course_name}\n\n")
-            for sort_key, filename, lines in all_course_data:
-                md.write(f"## Topic: {filename} (Sequence: {sort_key})\n")
-                for line in lines:
-                    md.write(f"* {line}\n")
-                md.write("\n---\n\n")
+        output_filename = get_base_path() / f"{course_name}_Translations.csv"
+        # Using utf-8-sig so Excel recognizes the UTF-8 encoding automatically
+        with open(output_filename, 'w', encoding='utf-8-sig', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            # Write header row
+            writer.writerow(["Translation Block ID", "Source Text", "Target Text"])
+            
+            for sort_key, filename, data_rows in all_course_data:
+                # Optional: Write a separator/header row for each file in the course
+                writer.writerow([f"--- File: {filename} ---", "", ""])
+                for row in data_rows:
+                    writer.writerow(row)
+                    
         print(f"  -> SUCCESS: Created {output_filename.name}")
     else:
         print(f"  -> No XLIFF data found.")
