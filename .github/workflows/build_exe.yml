@@ -17,16 +17,19 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install pyinstaller
+          # Install Nuitka along with zstandard (for file compression)
+          pip install nuitka zstandard
 
       - name: Build EXE
         run: |
           # --onefile makes it a single .exe
-          # --name sets the output name
-          pyinstaller --onefile --name "CourseExtractor" course_converter.py
+          # --assume-yes-for-downloads prevents the build from hanging in GitHub Actions if Nuitka needs to download C-compiler caching tools
+          # -o sets the output name
+          python -m nuitka --onefile --assume-yes-for-downloads -o CourseExtractor.exe course_converter.py
 
       - name: Upload EXE as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CourseExtractor-Tool
-          path: dist/CourseExtractor.exe
+          # Nuitka places the output in the root directory, so we remove the "dist/" folder path
+          path: CourseExtractor.exe
